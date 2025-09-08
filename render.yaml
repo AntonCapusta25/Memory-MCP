@@ -1,0 +1,22 @@
+
+# render.yaml - Render configuration
+services:
+  - type: web
+    name: memory-mcp-server
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python memory_server.py
+    plan: free
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: DB_PATH
+        value: /opt/render/project/src/memory.db
+      - key: DEBUG
+        value: false
+      - key: HEADLESS
+        value: true
+    disk:
+      name: memory-storage
+      mountPath: /opt/render/project/src
+      sizeGB: 1
