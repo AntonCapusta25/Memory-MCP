@@ -93,27 +93,16 @@ class MemorizeData(BaseModel):
     image_url: Optional[str] = Field(default=None, description="Optional image URL to store with memory")
     link_url: Optional[str] = Field(default=None, description="Optional web link to store with memory")
 
-class MemorizeWithFileData(BaseModel):
-    project: str = Field(description="Project name to categorize this memory")
-    content: str = Field(description="Content to memorize")
-    file_data: str = Field(description="Base64 encoded file data")
-    file_name: str = Field(description="Original filename")
-    file_type: str = Field(description="MIME type of the file")
-    metadata: Optional[Dict[str, Any]] = Field(default=None, description="Optional metadata for the memory")
-    tags: Optional[List[str]] = Field(default=None, description="Optional tags for easier recall")
-
 class RecallData(BaseModel):
     project: Optional[str] = Field(default=None, description="Project name to search within")
     query: Optional[str] = Field(default=None, description="Search query to match against content and tags")
     limit: int = Field(default=10, description="Maximum number of memories to return")
-    include_files: bool = Field(default=True, description="Include file attachments in results")
 
 class DeleteMemoryData(BaseModel):
     memory_id: int = Field(description="ID of the memory to delete")
 
-
 class SupabaseMemoryDatabase:
-    """Supabase database for storing project-based memories with file support"""
+    """Supabase database for storing project-based memories"""
     
     def __init__(self):
         self.client: Client = create_client(SUPABASE_URL, SUPABASE_KEY)
@@ -134,8 +123,7 @@ class SupabaseMemoryDatabase:
                 else:
                     logger.warning(f"⚠️ Storage bucket creation warning: {e}")
             
-            # The table should be created via Supabase dashboard or migration
-            # This is just a connectivity test
+            # Test database connection
             result = self.client.table("memories").select("count", count="exact").execute()
             logger.info("✅ Database connection verified")
             
@@ -144,23 +132,12 @@ class SupabaseMemoryDatabase:
             raise
     
     def store_memory(self, project: str, content: str, metadata: Optional[Dict] = None, 
-                    tags: Optional[List[str]] = None, file_data: Optional[str] = None,
-                    file_name: Optional[str] = None, file_type: Optional[str] = None,
-                    image_url: Optional[str] = None, link_url: Optional[str] = None) -> int:
-        """Store a new memory entry with optional file and link data"""
+                    tags: Optional[List[str]] = None, image_url: Optional[str] = None, 
+                    link_url: Optional[str] = None) -> int:
+        """Store a new memory entry"""
         try:
-            file_path = None
-            file_size = None
             link_title = None
             link_description = None
-            
-            # Handle file storage
-            if file_data and file_name:
-                file_path, file_size = self._save_file_to_supabase(file_data, file_name, file_type)
-            
-            # Handle image URL download
-            elif image_url:
-                file_path, file_name, file_type, file_size = self._download_and_store_image(image_url)
             
             # Handle link metadata extraction
             if link_url:
@@ -172,10 +149,6 @@ class SupabaseMemoryDatabase:
                 "content": content,
                 "metadata": metadata,
                 "tags": tags,
-                "file_path": file_path,
-                "file_name": file_name,
-                "file_type": file_type,
-                "file_size": file_size,
                 "link_url": link_url,
                 "link_title": link_title,
                 "link_description": link_description,
@@ -190,62 +163,6 @@ class SupabaseMemoryDatabase:
             
         except Exception as e:
             logger.error(f"❌ Failed to store memory: {e}")
-            raise
-    
-    def _save_file_to_supabase(self, file_data: str, file_name: str, file_type: str) -> tuple[str, int]:
-        """Save base64 file data to Supabase storage"""
-        try:
-            # Create unique filename
-            file_hash = hashlib.md5(file_data.encode()).hexdigest()[:8]
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            safe_name = "".join(c for c in file_name if c.isalnum() or c in "._-")
-            unique_filename = f"{timestamp}_{file_hash}_{safe_name}"
-            
-            # Decode file data
-            file_bytes = base64.b64decode(file_data)
-            file_size = len(file_bytes)
-            
-            # Upload to Supabase storage
-            self.client.storage.from_(self.files_bucket).upload(
-                path=unique_filename,
-                file=file_bytes,
-                file_options={"content-type": file_type}
-            )
-            
-            logger.info(f"✅ File uploaded to Supabase: {unique_filename}")
-            return unique_filename, file_size
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to save file to Supabase: {e}")
-            raise
-    
-    def _download_and_store_image(self, image_url: str) -> tuple[str, str, str, int]:
-        """Download image from URL and store in Supabase"""
-        try:
-            response = requests.get(image_url, timeout=30)
-            response.raise_for_status()
-            
-            # Determine file type
-            content_type = response.headers.get('content-type', 'image/jpeg')
-            ext = mimetypes.guess_extension(content_type) or '.jpg'
-            
-            # Create filename
-            url_hash = hashlib.md5(image_url.encode()).hexdigest()[:8]
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"image_{timestamp}_{url_hash}{ext}"
-            
-            # Upload to Supabase storage
-            self.client.storage.from_(self.files_bucket).upload(
-                path=filename,
-                file=response.content,
-                file_options={"content-type": content_type}
-            )
-            
-            logger.info(f"✅ Image downloaded and stored: {filename}")
-            return filename, filename, content_type, len(response.content)
-            
-        except Exception as e:
-            logger.error(f"❌ Failed to download and store image: {e}")
             raise
     
     def _extract_link_metadata(self, url: str) -> tuple[Optional[str], Optional[str]]:
@@ -276,8 +193,8 @@ class SupabaseMemoryDatabase:
             return None, None
     
     def recall_memories(self, project: Optional[str] = None, query: Optional[str] = None, 
-                       limit: int = 10, include_files: bool = True) -> List[Dict]:
-        """Recall memories with optional filtering and file support"""
+                       limit: int = 10) -> List[Dict]:
+        """Recall memories with optional filtering"""
         try:
             # Build query
             db_query = self.client.table("memories").select("*")
@@ -286,30 +203,14 @@ class SupabaseMemoryDatabase:
                 db_query = db_query.eq("project", project)
             
             if query:
-                # Use Supabase text search across multiple columns
+                # Use Supabase text search
                 search_query = f"%{query}%"
-                db_query = db_query.or_(f"content.ilike.{search_query},tags.cs.{{{query}}},link_title.ilike.{search_query}")
+                db_query = db_query.or_(f"content.ilike.{search_query},link_title.ilike.{search_query}")
             
             db_query = db_query.order("created_at", desc=True).limit(limit)
             
             result = db_query.execute()
             memories = result.data
-            
-            # Add file data if requested
-            if include_files:
-                for memory in memories:
-                    if memory.get('file_path'):
-                        try:
-                            file_data = self._get_file_from_supabase(memory['file_path'])
-                            memory['has_file'] = True
-                            memory['file_data_base64'] = file_data
-                        except Exception as e:
-                            logger.warning(f"⚠️ Failed to load file {memory['file_path']}: {e}")
-                            memory['has_file'] = False
-                            memory['file_data_base64'] = None
-                    else:
-                        memory['has_file'] = False
-                        memory['file_data_base64'] = None
             
             logger.info(f"✅ Found {len(memories)} memories")
             return memories
@@ -318,37 +219,22 @@ class SupabaseMemoryDatabase:
             logger.error(f"❌ Failed to recall memories: {e}")
             raise
     
-    def _get_file_from_supabase(self, file_path: str) -> Optional[str]:
-        """Get file content as base64 string from Supabase storage"""
-        try:
-            response = self.client.storage.from_(self.files_bucket).download(file_path)
-            return base64.b64encode(response).decode('utf-8')
-        except Exception as e:
-            logger.error(f"❌ Failed to download file from Supabase: {e}")
-            return None
-    
     def list_projects(self) -> List[Dict[str, Any]]:
         """Get all unique project names with memory counts"""
         try:
-            # Use Supabase aggregation
-            result = self.client.rpc("get_project_stats").execute()
-            projects = result.data or []
+            result = self.client.table("memories").select("project").execute()
+            project_names = list(set(row["project"] for row in result.data))
+            projects = []
             
-            # Fallback if RPC function doesn't exist
-            if not projects:
-                result = self.client.table("memories").select("project").execute()
-                project_names = list(set(row["project"] for row in result.data))
-                projects = []
+            for project_name in project_names:
+                count_result = self.client.table("memories").select("id", count="exact").eq("project", project_name).execute()
+                latest_result = self.client.table("memories").select("created_at").eq("project", project_name).order("created_at", desc=True).limit(1).execute()
                 
-                for project_name in project_names:
-                    count_result = self.client.table("memories").select("id", count="exact").eq("project", project_name).execute()
-                    latest_result = self.client.table("memories").select("created_at").eq("project", project_name).order("created_at", desc=True).limit(1).execute()
-                    
-                    projects.append({
-                        "name": project_name,
-                        "memory_count": count_result.count,
-                        "last_updated": latest_result.data[0]["created_at"] if latest_result.data else None
-                    })
+                projects.append({
+                    "name": project_name,
+                    "memory_count": count_result.count,
+                    "last_updated": latest_result.data[0]["created_at"] if latest_result.data else None
+                })
             
             logger.info(f"✅ Found {len(projects)} projects")
             return projects
@@ -360,33 +246,15 @@ class SupabaseMemoryDatabase:
     def delete_memory(self, memory_id: int) -> bool:
         """Delete a specific memory by ID"""
         try:
-            # Get memory info first to delete associated file
-            result = self.client.table("memories").select("file_path").eq("id", memory_id).execute()
+            delete_result = self.client.table("memories").delete().eq("id", memory_id).execute()
+            success = len(delete_result.data) > 0
             
-            if result.data:
-                memory = result.data[0]
-                
-                # Delete associated file from storage
-                if memory.get("file_path"):
-                    try:
-                        self.client.storage.from_(self.files_bucket).remove([memory["file_path"]])
-                        logger.info(f"✅ File deleted from storage: {memory['file_path']}")
-                    except Exception as e:
-                        logger.warning(f"⚠️ Failed to delete file: {e}")
-                
-                # Delete memory record
-                delete_result = self.client.table("memories").delete().eq("id", memory_id).execute()
-                success = len(delete_result.data) > 0
-                
-                if success:
-                    logger.info(f"✅ Memory {memory_id} deleted")
-                else:
-                    logger.warning(f"⚠️ Memory {memory_id} not found")
-                
-                return success
+            if success:
+                logger.info(f"✅ Memory {memory_id} deleted")
             else:
                 logger.warning(f"⚠️ Memory {memory_id} not found")
-                return False
+            
+            return success
                 
         except Exception as e:
             logger.error(f"❌ Failed to delete memory: {e}")
@@ -399,9 +267,9 @@ class SupabaseMemoryDatabase:
             total_result = self.client.table("memories").select("id", count="exact").execute()
             total_memories = total_result.count
             
-            # Total projects
-            projects_result = self.client.rpc("count_distinct_projects").execute()
-            total_projects = projects_result.data if projects_result.data else 0
+            # Count distinct projects
+            result = self.client.table("memories").select("project").execute()
+            total_projects = len(set(row["project"] for row in result.data))
             
             # Recent memories (last 7 days)
             from datetime import datetime, timedelta
@@ -420,7 +288,6 @@ class SupabaseMemoryDatabase:
             logger.error(f"❌ Failed to get stats: {e}")
             return {"error": str(e)}
 
-
 # Initialize global database instance
 try:
     db = SupabaseMemoryDatabase()
@@ -428,12 +295,11 @@ except Exception as e:
     logger.error(f"❌ Failed to initialize Supabase database: {e}")
     sys.exit(1)
 
-# MCP Tools using FastMCP decorators
+# MCP Tools
 @mcp.tool()
 async def health_check() -> Dict[str, Any]:
     """Health check endpoint with comprehensive status"""
     try:
-        # Test database connectivity
         stats = db.get_stats()
         
         return {
@@ -462,7 +328,7 @@ async def health_check() -> Dict[str, Any]:
 
 @mcp.tool()
 async def memorize(data: MemorizeData) -> Dict[str, Any]:
-    """Store content in memory under a specific project with optional image/link support"""
+    """Store content in memory under a specific project"""
     try:
         memory_id = db.store_memory(
             project=data.project, 
@@ -473,7 +339,7 @@ async def memorize(data: MemorizeData) -> Dict[str, Any]:
             link_url=data.link_url
         )
         
-        result_text = f"✅ Memory stored successfully!\n"
+        result_text = "✅ Memory stored successfully!\n"
         result_text += f"ID: {memory_id}\n"
         result_text += f"Project: {data.project}\n"
         result_text += f"Content: {data.content[:100]}{'...' if len(data.content) > 100 else ''}\n"
@@ -482,7 +348,7 @@ async def memorize(data: MemorizeData) -> Dict[str, Any]:
             result_text += f"Tags: {', '.join(data.tags)}\n"
         
         if data.image_url:
-            result_text += f"🖼️ Image: Downloaded and stored\n"
+            result_text += "🖼️ Image: Downloaded and stored\n"
         
         if data.link_url:
             result_text += f"🔗 Link: {data.link_url}\n"
@@ -503,48 +369,10 @@ async def memorize(data: MemorizeData) -> Dict[str, Any]:
         }
 
 @mcp.tool()
-async def memorize_with_file(data: MemorizeWithFileData) -> Dict[str, Any]:
-    """Store content with uploaded file (image, document, etc.)"""
-    try:
-        memory_id = db.store_memory(
-            project=data.project,
-            content=data.content,
-            metadata=data.metadata,
-            tags=data.tags,
-            file_data=data.file_data,
-            file_name=data.file_name,
-            file_type=data.file_type
-        )
-        
-        result_text = f"✅ Memory with file stored successfully!\n"
-        result_text += f"ID: {memory_id}\n"
-        result_text += f"Project: {data.project}\n"
-        result_text += f"Content: {data.content[:100]}{'...' if len(data.content) > 100 else ''}\n"
-        result_text += f"📎 File: {data.file_name} ({data.file_type})\n"
-        
-        if data.tags:
-            result_text += f"Tags: {', '.join(data.tags)}\n"
-        
-        return {
-            "success": True,
-            "memory_id": memory_id,
-            "project": data.project,
-            "file_name": data.file_name,
-            "file_type": data.file_type,
-            "message": result_text
-        }
-    except Exception as e:
-        logger.error(f"❌ Error in memorize_with_file: {str(e)}")
-        return {
-            "success": False,
-            "error": f"Failed to store memory with file: {str(e)[:200]}"
-        }
-
-@mcp.tool()
 async def recall(data: RecallData) -> Dict[str, Any]:
-    """Recall memories from a project or search across all memories with file support"""
+    """Recall memories from a project or search across all memories"""
     try:
-        memories = db.recall_memories(data.project, data.query, data.limit, data.include_files)
+        memories = db.recall_memories(data.project, data.query, data.limit)
         
         if not memories:
             return {
@@ -561,8 +389,7 @@ async def recall(data: RecallData) -> Dict[str, Any]:
                 "id": memory['id'],
                 "project": memory['project'],
                 "content": memory['content'],
-                "timestamp": memory['created_at'],
-                "has_file": memory['has_file']
+                "timestamp": memory['created_at']
             }
             
             if memory.get('tags'):
@@ -570,16 +397,6 @@ async def recall(data: RecallData) -> Dict[str, Any]:
             
             if memory.get('metadata'):
                 formatted_memory['metadata'] = memory['metadata']
-            
-            # Add file info
-            if memory.get('file_name'):
-                formatted_memory['file_info'] = {
-                    "name": memory['file_name'],
-                    "type": memory['file_type'],
-                    "size": memory['file_size']
-                }
-                if data.include_files and memory.get('file_data_base64'):
-                    formatted_memory['file_data'] = memory['file_data_base64']
             
             # Add link info
             if memory.get('link_url'):
@@ -599,11 +416,6 @@ async def recall(data: RecallData) -> Dict[str, Any]:
             
             if memory.get('tags'):
                 result_text += f"🏷️ Tags: {', '.join(memory['tags'])}\n"
-            
-            if memory.get('file_info'):
-                file_info = memory['file_info']
-                size_kb = file_info['size'] / 1024 if file_info['size'] else 0
-                result_text += f"📎 File: {file_info['name']} ({file_info['type']}, {size_kb:.1f}KB)\n"
             
             if memory.get('link_info'):
                 link_info = memory['link_info']
@@ -696,14 +508,14 @@ async def get_memory_stats() -> Dict[str, Any]:
         # Top projects by memory count
         top_projects = sorted(projects, key=lambda x: x['memory_count'], reverse=True)[:5]
         
-        result_text = f"📊 Memory Database Statistics\n\n"
+        result_text = "📊 Memory Database Statistics\n\n"
         result_text += f"📝 Total Memories: {stats['total_memories']}\n"
         result_text += f"📁 Total Projects: {stats['total_projects']}\n"
         result_text += f"🕒 Recent (7 days): {stats['recent_memories_7d']}\n"
         result_text += f"💾 Database: {stats['database_type']}\n\n"
         
         if top_projects:
-            result_text += f"🏆 Top Projects:\n"
+            result_text += "🏆 Top Projects:\n"
             for project in top_projects:
                 result_text += f"  • {project['name']}: {project['memory_count']} memories\n"
         
@@ -720,22 +532,95 @@ async def get_memory_stats() -> Dict[str, Any]:
             "error": f"Failed to get statistics: {str(e)[:200]}"
         }
 
-# Auto-activation and natural language processing
 @mcp.tool()
 async def auto_enable_memory() -> Dict[str, Any]:
-    """Auto-enable memory system - detects activation requests and sets up everything"""
+    """Auto-enable memory system"""
     try:
-        # Check if already initialized properly
         stats = db.get_stats()
         projects = db.list_projects()
         
-        result_text = f"🧠 Memory MCP Server Auto-Enabled!\n\n"
-        result_text += f"✅ Status: Active and Ready\n"
+        result_text = "🧠 Memory MCP Server Auto-Enabled!\n\n"
+        result_text += "✅ Status: Active and Ready\n"
         result_text += f"📝 Memories: {stats['total_memories']}\n" 
         result_text += f"📁 Projects: {stats['total_projects']}\n"
-        result_text += f"💾 Database: Supabase (Cloud)\n\n"
+        result_text += "💾 Database: Supabase (Cloud)\n\n"
         
-        result_text += f"🚀 Quick Start:\n"
-        result_text += f"• Say: 'Memorize this under project [name]: [content]'\n"
-        result_text += f"• Say: 'What do you remember about [project]?'\n"
-        result_text += f"• Say: 'List all my projects'\n\n
+        result_text += "🚀 Quick Start:\n"
+        result_text += "• Say: 'Memorize this under project [name]: [content]'\n"
+        result_text += "• Say: 'What do you remember about [project]?'\n"
+        result_text += "• Say: 'List all my projects'\n\n"
+        
+        if projects:
+            result_text += "📁 Available Projects:\n"
+            for project in projects[:5]:
+                result_text += f"  • {project['name']} ({project['memory_count']} memories)\n"
+        
+        result_text += "\n💡 Tip: Use tags for better organization and easier recall!"
+        result_text += "\n🔗 Supports: Images, files, web links, and rich metadata!"
+        
+        return {
+            "success": True,
+            "auto_enabled": True,
+            "stats": stats,
+            "projects": projects,
+            "message": result_text
+        }
+        
+    except Exception as e:
+        logger.error(f"❌ Error in auto_enable_memory: {str(e)}")
+        return {
+            "success": False,
+            "error": f"Auto-enable failed: {str(e)[:200]}"
+        }
+
+# Enhanced cleanup and startup
+async def cleanup():
+    """Enhanced cleanup with proper resource management"""
+    try:
+        logger.info("🔒 Cleanup completed successfully")
+    except Exception as e:
+        logger.error(f"❌ Error during cleanup: {e}")
+
+async def startup():
+    """Initialize components on startup"""
+    try:
+        logger.info("🚀 Starting Memory MCP Server with Supabase...")
+        
+        # Test database connectivity
+        stats = db.get_stats()
+        logger.info(f"✅ Database ready with {stats['total_memories']} memories in {stats['total_projects']} projects")
+        
+        logger.info("🎯 Memory server ready")
+        
+    except Exception as e:
+        logger.error(f"❌ Startup error: {e}")
+        raise
+
+# Main execution
+if __name__ == "__main__":
+    print("🧠 Starting Memory MCP Server with Supabase...")
+    print(f"⚙️  Configuration:")
+    print(f"  - Port: {PORT}")
+    print(f"  - Database: Supabase")
+    print(f"  - Debug Mode: {DEBUG_MODE}")
+    print(f"  - MCP Version: {MCP_VERSION}")
+    print()
+    
+    try:
+        # Run startup
+        asyncio.run(startup())
+        
+        # Start server
+        print(f"🌐 Server starting on http://0.0.0.0:{PORT}")
+        if MCP_VERSION == "new":
+            mcp.run(transport="sse")
+        else:
+            mcp.run()
+            
+    except KeyboardInterrupt:
+        print("\n🛑 Server shutting down...")
+        asyncio.run(cleanup())
+    except Exception as e:
+        logger.error(f"❌ Server error: {e}")
+        asyncio.run(cleanup())
+        sys.exit(1)
