@@ -1,0 +1,25 @@
+# FastMCP for simplified MCP server development
+fastmcp>=0.9.0
+
+# Pydantic for data validation (comes with FastMCP)
+pydantic>=2.0.0
+
+# Supabase Python client
+supabase>=2.0.0
+
+# HTTP requests for downloading images and extracting link metadata
+requests>=2.31.0
+
+# Standard library dependencies (built into Python)
+# json - built-in  
+# logging - built-in
+# datetime - built-in
+# pathlib - built-in
+# typing - built-in
+# asyncio - built-in
+# os - built-in
+# time - built-in
+# base64 - built-in
+# hashlib - built-in
+# mimetypes - built-in
+# urllib.parse - built-in
