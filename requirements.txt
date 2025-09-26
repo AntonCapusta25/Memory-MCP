@@ -1,5 +1,11 @@
-# FastMCP for simplified MCP server development
+# FastMCP and its required dependency: uvicorn (ASGI server)
 fastmcp>=0.9.0
+
+# FastAPI is required for static file serving (and is an explicit dependency of fastmcp)
+fastapi>=0.104.0 
+
+# ASGI server to run FastAPI/FastMCP in production on Render
+uvicorn>=0.23.2
 
 # Pydantic for data validation (comes with FastMCP)
 pydantic>=2.0.0
