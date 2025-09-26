@@ -84,6 +84,18 @@ except Exception as e:
     logger.error(f"❌ Failed to initialize FastMCP: {e}")
     sys.exit(1)
 
+# Use the underlying FastAPI app to mount the static directory
+try:
+    # FastMCP holds the FastAPI app instance internally
+    app = mcp.app 
+    
+    # Mount the 'public' directory to serve the favicon.ico file
+    app.mount("/", StaticFiles(directory="public"), name="public_files")
+
+    logger.info("✅ Static files mounted (including favicon)")
+except Exception as e:
+    logger.warning(f"⚠️ Failed to mount static files: {e}")
+    
 # Pydantic models
 class MemorizeData(BaseModel):
     project: str = Field(description="Project name to categorize this memory")
