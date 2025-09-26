@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Union
 from pydantic import BaseModel, Field
 from urllib.parse import urlparse
 import mimetypes
+from fastapi.staticfiles import StaticFiles 
 
 # Enhanced error handling for imports
 try:
